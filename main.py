@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from payman.paymanRouter import router as paymanai_router
+from src.payman.paymanRouter import router as paymanai_router
 import uvicorn
 
 app = FastAPI()
