@@ -1,26 +1,84 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from .paymanClient import payman_client
-from models.schemas import PaymentOptimizationRequest, RecipientAnalysis, PaymentResult, PayeeRequest
+from models.schemas import PaymentOptimizationRequest, RecipientAnalysis, PaymentResult, PayeeRequest, PaymentRequest
 from agents.paymentAgent import agent_graph
 from models.database import get_db, Payee, PaymentMethod
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/payman")
 
-class PaymentRequest(BaseModel):
-    payee_id: str
-    amount: float
-    currency: str
-
 @router.post("/send-payment")
-async def send_payment(request: PaymentRequest): 
+async def send_payment(request: PaymentRequest, db: Session = Depends(get_db)): 
     try:
+        # Get payee details from database
+        payee = db.query(Payee).join(PaymentMethod).filter(
+            PaymentMethod.payman_payee_id == request.payee_id
+        ).first()
+
+        if not payee:
+            raise HTTPException(status_code=404, detail="Payee not found")
+        
+        # Initialize agent state for payment optimization
+        initial_state = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": f"""Analyze and execute payment:
+                    Amount: {request.amount} {request.currency}
+                    Recipient: {payee.name} ({payee.email})
+                    Available Payment Methods: {[pm.type for pm in payee.payment_methods]}
+                    """
+                }
+            ],
+            "sender_info": {},
+            "recipient_info": {
+                "name": payee.name,
+                "email": payee.email,
+                "payment_methods": [
+                    {
+                        "type": pm.type,
+                        "payman_payee_id": pm.payman_payee_id,
+                        "is_default": pm.is_default
+                    } for pm in payee.payment_methods
+                ]
+            },
+            "payment_details": {
+                "amount": request.amount,
+                "currency": request.currency
+            }
+        }
+
+        # Run the agent
+        result = agent_graph.invoke(initial_state)
+        
+        # Get the final recommendation
+        final_message = result["messages"][-1].content
+
+        # Execute payment based on agent's recommendation
+        recommended_method = next(
+            (pm for pm in payee.payment_methods 
+             if pm.type == ("CRYPTO_ADDRESS" if "usdc" in final_message.lower() else "US_ACH")),
+            payee.payment_methods[0]  # Fallback to first available method
+        )
+
+        # Execute the payment
         response = payman_client.payments.send_payment(
-            payee_id=request.payee_id,
+            payee_id=recommended_method.payman_payee_id,
             amount_decimal=request.amount,
         )
-        return {"status": "success", "data": response}
+
+        return {
+            "status": "success",
+            "data": response,
+            "optimization": {
+                "method_used": recommended_method.type,
+                "reasoning": final_message,
+                "fees": request.amount * (0.001 if recommended_method.type == "CRYPTO_ADDRESS" else 0.04),
+                "settlement_time": "instant" if recommended_method.type == "CRYPTO_ADDRESS" else "3-5 business days"
+            }
+        }
+    
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
