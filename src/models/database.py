@@ -27,7 +27,7 @@ class PaymentMethod(Base):
     payee = relationship("Payee", back_populates="payment_methods")
     payman_payee_id = Column(String, unique=True, index=True)  # Payman payee ID
     type = Column(String)  # US_ACH or CRYPTO_ADDRESS
-    account_details = Column(JSON)  # For storing ACH or crypto details
+    account_details = Column(JSON, unique=True)  # For storing ACH or crypto details
     is_default = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.now(datetime.timezone.utc))
     updated_at = Column(DateTime, default=datetime.datetime.now(datetime.timezone.utc), onupdate=datetime.datetime.now(datetime.timezone.utc))

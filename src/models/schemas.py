@@ -11,8 +11,8 @@ class ACHDetails(BaseModel):
     account_type: Literal["checking", "savings"]
 
 class CryptoDetails(BaseModel):
-    wallet_address: str
-    blockchain: Literal["Ethereum", "Polygon", "Base", "Arbitrum", "Avalanche", "Optimism", "Solana"]
+    address: str
+    chain: Literal["Ethereum", "Polygon", "Base", "Arbitrum", "Avalanche", "Optimism", "Solana"]
 
 class PaymentMethodRequest(BaseModel):
     type: Literal["US_ACH", "CRYPTO_ADDRESS"]
@@ -22,8 +22,8 @@ class PaymentMethodRequest(BaseModel):
 
 class PayeeRequest(BaseModel):
     name: str
-    email: str
-    contact_details: dict
+    # email: str
+    contact_details: object
     payment_methods: List[PaymentMethodRequest]
 
 class PaymentRequest(BaseModel):

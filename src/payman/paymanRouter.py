@@ -1,5 +1,4 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
-from pydantic import BaseModel
 from .paymanClient import payman_client
 from models.schemas import PayeeRequest, PaymentRequest
 from agents.paymentAgent import agent_graph
@@ -85,71 +84,85 @@ async def send_payment(request: PaymentRequest, background_tasks: BackgroundTask
 
 @router.post("/create-payee")
 async def create_payee(request: PayeeRequest, db: Session = Depends(get_db)):
-    try:
-        # First, create or get the payee record
-        db_payee = db.query(Payee).filter(Payee.email == request.email).first()
-
-        if not db_payee:
-            db_payee = Payee(
-                name=request.name,
-                email=request.email,
-                contact_details=request.contact_details
-            )
-            db.add(db_payee)
-            db.commit()
-            db.refresh(db_payee)
-
-         # Process each payment method
-        for payment_method in request.payment_methods:
-            if payment_method.type == "US_ACH":
-                ach = payment_method.ach_details
-                response = payman_client.payments.create_payee(
+    # Start a new transaction
+    with db.begin():
+        try:
+            # First, create or get the payee record
+            db_payee = db.query(Payee).filter(Payee.email == request.contact_details["email"]).first()
+            if not db_payee:
+                db_payee = Payee(
                     name=request.name,
-                    type="US_ACH",
-                    account_holder_name=ach.account_holder_name,
-                    account_holder_type=ach.account_holder_type,
-                    routing_number=ach.routing_number,
-                    account_number=ach.account_number,
-                    account_type=ach.account_type,
-                    contact_details=request.contact_details,
+                    email=request.contact_details["email"],
+                    contact_details=request.contact_details
                 )
-                account_details = payment_method.ach_details.model_dump()
+                db.add(db_payee)
+                db.flush() 
 
-            elif payment_method.type == "CRYPTO_ADDRESS":
-                crypto = payment_method.crypto_details
-                response = payman_client.payments.create_payee(
-                    name=request.name,
-                    type="CRYPTO_ADDRESS",
-                    currency="USDC",
-                    address=crypto.wallet_address,
-                    chain=crypto.blockchain,
-                    contact_details=request.contact_details,
+            # Process each payment method
+            for payment_method in request.payment_methods:
+                if payment_method.type == "US_ACH":
+                    ach = payment_method.ach_details
+                    try:
+                        response = payman_client.payments.create_payee(
+                            name=request.name,
+                            type="US_ACH",
+                            account_holder_name=ach.account_holder_name,
+                            account_holder_type=ach.account_holder_type,
+                            routing_number=ach.routing_number,
+                            account_number=ach.account_number,
+                            account_type=ach.account_type,
+                            contact_details=request.contact_details,
+                        )
+                    except Exception as e:
+                        raise HTTPException(status_code=400, detail=str(e))
+                    
+                    account_details = payment_method.ach_details.model_dump()
+                    payman_payee_id = getattr(response, 'id', None)
+
+                elif payment_method.type == "CRYPTO_ADDRESS":
+                    crypto = payment_method.crypto_details
+                    try:
+
+                        response = payman_client.payments.create_payee(
+                            name=request.name,
+                            type="CRYPTO_ADDRESS",
+                            currency="USDC",
+                            address=crypto.address,
+                            chain=crypto.chain,
+                            contact_details=request.contact_details,
+                        )
+                    except Exception as e:
+                        raise HTTPException(status_code=400, detail=str(e))
+                    
+                    account_details = payment_method.crypto_details.model_dump()
+                    payman_payee_id = getattr(response, 'id', None)
+
+
+                
+                # Create payment method record
+                db_payment_method = PaymentMethod(
+                    payee_id=db_payee.id,
+                    payman_payee_id=payman_payee_id,
+                    type=payment_method.type,
+                    account_details=account_details,
+                    is_default=payment_method.is_default
                 )
-                account_details = payment_method.crypto_details.model_dump()
+               
+                
+                # If this is default, remove default from other payment methods
+                if payment_method.is_default:
+                    db.query(PaymentMethod).filter(
+                        PaymentMethod.payee_id == db_payee.id,
+                        PaymentMethod.id != db_payment_method.id
+                    ).update({"is_default": False})
 
-            # Create payment method record
-            db_payment_method = PaymentMethod(
-                payee_id=db_payee.id,
-                payman_payee_id=response["id"],
-                type=payment_method.type,
-                account_details=account_details,
-                is_default=payment_method.is_default
-            )
+                db.add(db_payment_method)
             
-            # If this is default, remove default from other payment methods
-            if payment_method.is_default:
-                db.query(PaymentMethod).filter(
-                    PaymentMethod.payee_id == db_payee.id,
-                    PaymentMethod.id != db_payment_method.id
-                ).update({"is_default": False})
+            # The transaction will automatically commit if no exception is raised
+            return {"status": "success", "data": {"payee_id": db_payee.id}}
 
-            db.add(db_payment_method)
-            
-        db.commit()
-        return {"status": "success", "data": {"payee_id": db_payee.id}}
-
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/search-payees")
 async def search_payees():
