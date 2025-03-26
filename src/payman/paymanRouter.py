@@ -1,7 +1,7 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 from .paymanClient import payman_client
-from models.schemas import PaymentOptimizationRequest, RecipientAnalysis, PaymentResult, PayeeRequest, PaymentRequest
+from models.schemas import PayeeRequest, PaymentRequest
 from agents.paymentAgent import agent_graph
 from models.database import get_db, Payee, PaymentMethod
 from sqlalchemy.orm import Session
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 router = APIRouter(prefix="/payman")
 
 @router.post("/send-payment")
-async def send_payment(request: PaymentRequest, db: Session = Depends(get_db)): 
+async def send_payment(request: PaymentRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)): 
     try:
         # Get payee details from database
         payee = db.query(Payee).join(PaymentMethod).filter(
@@ -46,7 +46,8 @@ async def send_payment(request: PaymentRequest, db: Session = Depends(get_db)):
             "payment_details": {
                 "amount": request.amount,
                 "currency": request.currency
-            }
+            },
+            "background_tasks": background_tasks
         }
 
         # Run the agent
@@ -163,97 +164,5 @@ async def get_balance():
     try:
         response = payman_client.balances.get_spendable_balance("USD")
         return {"status": "success", "data": response}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@router.post("/optimize-payment", response_model=RecipientAnalysis)
-async def optimize_payment(request: PaymentOptimizationRequest):
-    """Analyze and optimize a payment transaction"""
-    try:
-        # Initialize agent state
-        initial_state = {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": f"""Analyze payment optimization for:
-                    Amount: {request.amount} {request.source_currency}
-                    Recipient: {request.recipient_name} ({request.recipient_email})
-                    Country: {request.recipient_country}
-                    Urgency: {request.payment_urgency}
-                    """
-                }
-            ],
-            "sender_info": {},
-            "recipient_info": {},
-            "payment_details": {
-                "amount": request.amount,
-                "currency": request.source_currency,
-                "destination_currency": request.destination_currency
-            }
-        }
-
-        # Run the agent
-        result = agent_graph.invoke(initial_state)
-        
-        # Process the agent's recommendation
-        final_message = result["messages"][-1].content
-        
-        # Parse recommendation into structured format
-        # (You'll need to implement proper parsing based on your agent's output format)
-        analysis = RecipientAnalysis(
-            has_crypto_wallet=True if "crypto" in final_message.lower() else False,
-            recommended_payment_method="USDC" if "usdc" in final_message.lower() else "WIRE",
-            estimated_fees={
-                "USDC": request.amount * 0.001,
-                "WIRE": request.amount * 0.04
-            },
-            estimated_settlement_time={
-                "USDC": "instant",
-                "WIRE": "3-5 business days"
-            },
-            optimal_route=final_message
-        )
-        
-        return analysis
-
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@router.post("/execute-optimized-payment", response_model=PaymentResult)
-async def execute_optimized_payment(request: PaymentOptimizationRequest):
-    """Execute the optimized payment based on agent's recommendation"""
-    try:
-        # First get the optimization analysis
-        analysis = await optimize_payment(request)
-        
-        # Execute the payment using the recommended method
-        if analysis.recommended_payment_method == "USDC":
-            # Create crypto payee if doesn't exist
-            payee = payman_client.create_payee(
-                type="CRYPTO_ADDRESS",
-                name=request.recipient_name,
-                contact_details={"email": request.recipient_email}
-            )
-            
-            # Send payment
-            payment = payman_client.send_payment(
-                amount_decimal=request.amount,
-                payee_id=payee.id,
-                memo=f"Optimized payment to {request.recipient_name}"
-            )
-            
-            return PaymentResult(
-                success=True,
-                transaction_id=payment.reference,
-                payment_method_used="USDC",
-                fees_saved=request.amount * 0.039,  # Difference between WIRE and USDC fees
-                settlement_time="instant",
-                message="Payment successfully processed via USDC"
-            )
-        else:
-            # Handle traditional wire transfer
-            # ... implement wire transfer logic ...
-            pass
-
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
