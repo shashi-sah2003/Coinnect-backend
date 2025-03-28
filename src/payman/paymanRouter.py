@@ -46,7 +46,8 @@ async def send_payment(request: PaymentRequest, background_tasks: BackgroundTask
                 "amount": request.amount,
                 "currency": request.currency
             },
-            "background_tasks": background_tasks
+            "background_tasks": background_tasks,
+            "iteration_count": 0
         }
 
         # Run the agent
@@ -59,7 +60,7 @@ async def send_payment(request: PaymentRequest, background_tasks: BackgroundTask
         recommended_method = next(
             (pm for pm in payee.payment_methods 
              if pm.type == ("CRYPTO_ADDRESS" if "usdc" in final_message.lower() else "US_ACH")),
-            payee.payment_methods[0]  # Fallback to first available method
+            payee.payment_methods[0]  
         )
 
         # Execute the payment
