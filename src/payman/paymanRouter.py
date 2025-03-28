@@ -173,10 +173,10 @@ async def search_payees():
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/get-balance")
-async def get_balance():
+@router.get("/get-balance/{currency}")
+async def get_balance(currency: str):
     try:
-        response = payman_client.balances.get_spendable_balance("USD")
+        response = payman_client.balances.get_spendable_balance(currency)
         return {"status": "success", "data": response}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
