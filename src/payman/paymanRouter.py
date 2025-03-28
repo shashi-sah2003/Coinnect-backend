@@ -10,7 +10,7 @@ router = APIRouter(prefix="/payman")
 @router.post("/send-payment")
 async def send_payment(request: PaymentRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)): 
     try:
-        # Get payee details from database
+        # 1. Get payee details from database
         payee = db.query(Payee).join(PaymentMethod).filter(
             PaymentMethod.payman_payee_id == request.payee_id
         ).first()
@@ -18,7 +18,7 @@ async def send_payment(request: PaymentRequest, background_tasks: BackgroundTask
         if not payee:
             raise HTTPException(status_code=404, detail="Payee not found")
         
-        # Initialize agent state for payment optimization
+        # 2. Initialize agent state for payment optimization
         initial_state = {
             "messages": [
                 {
@@ -50,20 +50,20 @@ async def send_payment(request: PaymentRequest, background_tasks: BackgroundTask
             "iteration_count": 0
         }
 
-        # Run the agent
+        # 3. Run the agent
         result = agent_graph.invoke(initial_state)
         
-        # Get the final recommendation
+        # 4. Get the final recommendation
         final_message = result["messages"][-1].content
 
-        # Execute payment based on agent's recommendation
+        # 5. Execute payment based on agent's recommendation
         recommended_method = next(
             (pm for pm in payee.payment_methods 
              if pm.type == ("CRYPTO_ADDRESS" if "usdc" in final_message.lower() else "US_ACH")),
             payee.payment_methods[0]  
         )
 
-        # Execute the payment
+        # 6. Execute the payment
         response = payman_client.payments.send_payment(
             payee_id=recommended_method.payman_payee_id,
             amount_decimal=request.amount,

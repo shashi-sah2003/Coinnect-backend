@@ -160,7 +160,7 @@ def process_step(state: AgentState):
     messages.append(AIMessage(content=response.content))
 
     # Check if the agent should continue
-    max_iterations = 3  # Set maximum iterations
+    max_iterations = 3 
     if iteration_count >= max_iterations or "final recommendation:" in response.content.lower():
         should_continue_flag = False
     else:
@@ -175,16 +175,13 @@ def process_step(state: AgentState):
         "continue": should_continue_flag  
     }
 
-# Create the workflow graph
 workflow = StateGraph(AgentState)
 
-# Add nodes and edges
 workflow.add_node("process", process_step)
 
-# Add conditional edges
 workflow.add_conditional_edges(
     "process",
-    lambda state: state["continue"],  # Check the 'continue' flag in the state
+    lambda state: state["continue"],  
     {
         True: "process",
         False: END
@@ -193,5 +190,4 @@ workflow.add_conditional_edges(
 
 workflow.set_entry_point("process")
 
-# Compile the graph
 agent_graph = workflow.compile()
