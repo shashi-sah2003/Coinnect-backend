@@ -7,7 +7,7 @@ A FastAPI backend service that optimizes cross-border payments by analyzing and 
 - Payment method optimization using AI agent
 - Support for both ACH and cryptocurrency (USDC) payments
 - Automated fee analysis and recommendations
-- Email notifications for potential fee savings
+- Email notifications for potential fee savings to payee if send method is US_ACH
 - Payee management (create, search)
 - Balance checking
 
